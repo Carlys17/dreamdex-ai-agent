@@ -43,13 +43,26 @@ export async function execute(
 
   const size = Math.min(decision.size, opts.maxSize);
   // We always BUY (YES or NO) — either way we cross the touch to take liquidity.
+  // The book is quoted in YES terms; placeLimit wants the price in the OUTCOME'S
+  // own terms and complements NO internally.
+  //   BUY YES crosses the YES ask:            price_yes = bestAsk + ε
+  //   BUY NO  crosses the NO ask = 1 - yesBid: price_no  = (1 - bestBid) + ε
+  // The limit is a worst-case guard (IOC takes at the resting price), so keep
+  // it tight: if the book shifts between read and send we refuse to chase.
   const outcome = decision.action === "BUY_YES" ? "YES" : "NO";
   const side = "buy";
-  const mid = market.mid ?? 0.5;
-  // Price to cross: buy YES slightly above ask, or buy NO slightly below bid.
-  const price = outcome === "YES"
-    ? (market.bestAsk ?? mid) + 0.02
-    : (market.bestBid ?? mid) - 0.02;
+  let price: number;
+  if (outcome === "YES") {
+    if (market.bestAsk == null) {
+      return { ...base, outcome: "skipped", reason: "no YES ask to cross" };
+    }
+    price = Math.min(0.99, market.bestAsk + 0.01);
+  } else {
+    if (market.bestBid == null) {
+      return { ...base, outcome: "skipped", reason: "no NO liquidity (no YES bid)" };
+    }
+    price = Math.min(0.99, 1 - market.bestBid + 0.01);
+  }
 
   if (opts.dryRun) {
     return {

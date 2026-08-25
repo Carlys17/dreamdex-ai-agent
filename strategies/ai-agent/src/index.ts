@@ -63,6 +63,7 @@ async function main() {
   );
 
   const midHistory = new Map<string, number[]>();
+  const spotHistory = new Map<string, { ts: number; price: number }[]>();
   let cycle = 0;
 
   while (true) {
@@ -91,18 +92,43 @@ async function main() {
       }
 
       if (decisions.length === 0) {
+        // Record spot samples per asset so we can measure drift since window open.
+        const nowMs = Date.now();
+        for (const m of markets) {
+          if (!m.asset || m.asset === "?") continue;
+          const arr = spotHistory.get(m.asset) ?? [];
+          arr.push({ ts: nowMs, price: m.spot });
+          // keep ~10 min of samples
+          spotHistory.set(m.asset, arr.filter((s) => nowMs - s.ts < 600_000));
+        }
+
         decisions = markets.map((m) => {
           const hist = midHistory.get(m.symbol) ?? [];
           midHistory.set(m.symbol, [...hist, m.mid ?? 0.5].slice(-5));
-          // Use live spot price as the anchor for directional signal.
-          const anchor = m.spot ?? m.mid ?? 0.5;
+
+          // Spot at window open: the window opened at (expiry - interval). Find
+          // the sample closest to that time. Fall back to current spot if we
+          // have no history yet (agent just started).
+          const intervalSec = m.cadenceMins * 60;
+          const openTs = (Number(m.onchain.expiry) - intervalSec) * 1000;
+          const samples = spotHistory.get(m.asset) ?? [];
+          let spotAtOpen = m.spot;
+          const first = samples[0];
+          if (first) {
+            let best = first;
+            for (const s of samples) {
+              if (Math.abs(s.ts - openTs) < Math.abs(best.ts - openTs)) best = s;
+            }
+            spotAtOpen = best.price;
+          }
+
           return heuristicDecide({
             market: m,
             recentMids: hist,
-            spotAtOpen: anchor,
-            spotNow: anchor,
-            elapsedSec: Math.max(1, 300 - m.secondsLeft),
-            windowSec: 300,
+            spotAtOpen,
+            spotNow: m.spot,
+            elapsedSec: Math.max(1, intervalSec - m.secondsLeft),
+            windowSec: intervalSec,
           });
         });
       }

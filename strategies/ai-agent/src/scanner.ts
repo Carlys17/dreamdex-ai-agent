@@ -15,7 +15,7 @@ export interface ScanResult {
   spot: Record<string, number>; // asset -> live spot price (BTC/ETH)
 }
 
-export async function scan(ctx: EcContext, minLeftSec = 60, maxLeftSec = 3600): Promise<MarketSnapshot[]> {
+export async function scan(ctx: EcContext, minLeftSec = 30, maxLeftSec = 3600): Promise<MarketSnapshot[]> {
   const live = await activeMarkets(ctx, { max: ctx.config.maxMarkets });
   const now = Date.now() / 1000;
 
@@ -53,7 +53,7 @@ export async function scan(ctx: EcContext, minLeftSec = 60, maxLeftSec = 3600): 
       ? Math.round(Number(info.intervalSec) / 60)
       : 5;
 
-    // anchor spot for this asset (fall back to mid if feed unavailable)
+    // anchor spot for this asset; 0 = feed unavailable (brain skips spot signal)
     const liveSpot = info.marketType === "BINARY" && info.asset ? spot[info.asset] : undefined;
 
     out.push({
@@ -77,7 +77,7 @@ export async function scan(ctx: EcContext, minLeftSec = 60, maxLeftSec = 3600): 
         ? Number(info.cumulativeQuoteVolume) / 10 ** info.quoteDecimals
         : 0,
       tradeCount: info.tradeCount ? Number(info.tradeCount) : 0,
-      spot: liveSpot ?? snap.yesMid ?? 0.5,
+      spot: liveSpot ?? 0,
     });
   }
 
