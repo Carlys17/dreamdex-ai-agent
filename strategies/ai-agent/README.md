@@ -47,8 +47,8 @@ NETWORK=testnet
 VENUE_ID=0x679795a0195a1b76cdebb7c51d74e058aee92919b8c3389af86ef24535e8a28c
 PRIVATE_KEY=0x...        # only needed for real trades (DRY_RUN=false)
 DRY_RUN=true             # start here
-MIN_EDGE=0.05
-MAX_SIZE=5
+MIN_EDGE=0.03
+MAX_SIZE=3
 LLM_PROVIDER=heuristic   # or "ritual"
 RITUAL_RPC_URL=https://rpc.ritualchain.org   # for LLM_PROVIDER=ritual
 ```

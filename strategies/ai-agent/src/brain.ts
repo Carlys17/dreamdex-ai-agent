@@ -31,6 +31,9 @@ export function heuristicDecide(input: HeuristicInput): AiDecision {
     const tail = recentMids[recentMids.length - 1];
     if (head !== undefined && tail !== undefined) {
       sMomentum = mid + (tail - head) * 1.5;
+      // Clamp so momentum can't push fair probability outside (0, 1) and corrupt
+      // confidence math (which uses |edge| = |fair - mid|).
+      sMomentum = Math.max(0.01, Math.min(0.99, sMomentum));
     }
   }
 

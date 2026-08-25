@@ -42,8 +42,8 @@ function loadAgentConfig(ctx: EcContext, args: ReturnType<typeof parseArgs>): Ag
   return {
     llm,
     dryRun: args.dryRun ?? process.env.DRY_RUN !== "false",
-    minEdge: Number(process.env.MIN_EDGE ?? "0.05"),
-    maxSize: Number(process.env.MAX_SIZE ?? "5"),
+    minEdge: Number(process.env.MIN_EDGE ?? "0.03"),
+    maxSize: Number(process.env.MAX_SIZE ?? "3"),
     pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? "8000"),
     ritualRpcUrl: process.env.RITUAL_RPC_URL,
   };
