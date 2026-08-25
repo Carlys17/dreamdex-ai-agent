@@ -24,9 +24,14 @@ function parseArgs(): { llm?: "heuristic" | "ritual"; dryRun?: boolean } {
     const arg = args[i];
     if (arg && arg.startsWith("--")) {
       const key = arg.slice(2);
-      const val = i + 1 < args.length ? (args[i + 1] ?? "") : "";
-      out[key] = val;
-      i++;
+      // boolean flag if next token is another flag or absent
+      const next = i + 1 < args.length ? (args[i + 1] ?? "") : "";
+      if (next.startsWith("--") || next === "") {
+        out[key] = "";
+      } else {
+        out[key] = next;
+        i++;
+      }
     }
   }
   return {
@@ -64,6 +69,9 @@ async function main() {
 
   const midHistory = new Map<string, number[]>();
   const spotHistory = new Map<string, { ts: number; price: number }[]>();
+  // one position per (market window, side); symbol embeds the window timestamp
+  // so keys are naturally unique per window. Pruned when the market disappears.
+  const position = new Set<string>();
   let cycle = 0;
 
   while (true) {
@@ -74,6 +82,22 @@ async function main() {
       if (markets.length === 0) {
         await new Promise((r) => setTimeout(r, cfg.pollIntervalMs));
         continue;
+      }
+
+      // --- RECORD HISTORY (always, regardless of brain) ---
+      // So spot/momentum signals stay warm even when Ritual is the active brain.
+      const nowMs = Date.now();
+      for (const m of markets) {
+        if (!m.asset || m.asset === "?") continue;
+        const arr = spotHistory.get(m.asset) ?? [];
+        arr.push({ ts: nowMs, price: m.spot });
+        spotHistory.set(m.asset, arr.filter((s) => nowMs - s.ts < 600_000));
+      }
+
+      // prune position keys for markets that expired / left the scan
+      const liveSymbols = new Set(markets.map((m) => m.symbol));
+      for (const key of position) {
+        if (!liveSymbols.has(key)) position.delete(key);
       }
 
       // --- BRAIN ---
@@ -92,16 +116,6 @@ async function main() {
       }
 
       if (decisions.length === 0) {
-        // Record spot samples per asset so we can measure drift since window open.
-        const nowMs = Date.now();
-        for (const m of markets) {
-          if (!m.asset || m.asset === "?") continue;
-          const arr = spotHistory.get(m.asset) ?? [];
-          arr.push({ ts: nowMs, price: m.spot });
-          // keep ~10 min of samples
-          spotHistory.set(m.asset, arr.filter((s) => nowMs - s.ts < 600_000));
-        }
-
         decisions = markets.map((m) => {
           const hist = midHistory.get(m.symbol) ?? [];
           midHistory.set(m.symbol, [...hist, m.mid ?? 0.5].slice(-5));
@@ -129,6 +143,7 @@ async function main() {
             spotNow: m.spot,
             elapsedSec: Math.max(1, intervalSec - m.secondsLeft),
             windowSec: intervalSec,
+            minEdge: cfg.minEdge,
           });
         });
       }
@@ -141,11 +156,29 @@ async function main() {
       for (const d of actionable) {
         const market = markets.find((m) => m.symbol === d.symbol);
         if (!market) continue;
+
+        // --- POSITION TRACKING (prevent unbounded re-entry) ---
+        // One position per market window, any side. Buying both YES and NO in
+        // the same window pays the spread twice = locked-in loss, so once we
+        // are positioned we stand down until the window expires.
+        const key = market.symbol;
+        if (position.has(key)) {
+          if (cfg.dryRun) {
+            log(`skip (already positioned) | ${d.action} ${market.symbol}`);
+          }
+          continue;
+        }
+        position.add(key);
+
         const res = await execute(ctx, market, d, {
           dryRun: cfg.dryRun,
           minEdge: cfg.minEdge,
           maxSize: cfg.maxSize,
         });
+        // if the order didn't fill, free the slot so we can retry next cycle
+        if (res.outcome !== "filled" && res.outcome !== "dry-run") {
+          position.delete(key);
+        }
         log(
           `${res.outcome.padEnd(8)} | ${d.action} ${res.size} ${market.symbol} ` +
             `edge=${d.edge.toFixed(3)} conf=${d.confidence.toFixed(2)} ` +

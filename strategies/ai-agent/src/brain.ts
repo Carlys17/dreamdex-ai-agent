@@ -16,10 +16,11 @@ export interface HeuristicInput {
   spotNow: number; // underlying price now
   elapsedSec: number;
   windowSec: number;
+  minEdge: number; // act threshold (respects MIN_EDGE env)
 }
 
 export function heuristicDecide(input: HeuristicInput): AiDecision {
-  const { market, recentMids, spotAtOpen, spotNow, elapsedSec, windowSec } = input;
+  const { market, recentMids, spotAtOpen, spotNow, elapsedSec, windowSec, minEdge } = input;
   const mid = market.mid ?? 0.5;
 
   const sMarket = mid;
@@ -37,11 +38,16 @@ export function heuristicDecide(input: HeuristicInput): AiDecision {
     }
   }
 
-  // spot drift -> probability shift, linear extrapolation of log-return
+  // spot drift -> probability shift, linear extrapolation of log-return.
+  // Guards:
+  //  - both prices must be > 0 (feed death mid-run gives log(0) = -Infinity)
+  //  - extrapolation factor capped at 10x: at market open (elapsedSec ~1-4s)
+  //    a 0.1% tick would otherwise project to a 0.25 shift = false edge.
   let sSpot = mid;
-  if (spotAtOpen > 0 && elapsedSec > 0 && windowSec > 0) {
+  if (spotAtOpen > 0 && spotNow > 0 && elapsedSec > 0 && windowSec > 0) {
     const logReturn = Math.log(spotNow / spotAtOpen);
-    const projected = logReturn * (windowSec / elapsedSec);
+    const factor = Math.min(10, windowSec / elapsedSec);
+    const projected = logReturn * factor;
     const shift = Math.tanh(projected * 8) * 0.25;
     sSpot = mid + shift;
   }
@@ -59,10 +65,10 @@ export function heuristicDecide(input: HeuristicInput): AiDecision {
 
   let action: AiDecision["action"] = "HOLD";
   let size = 0;
-  if (edge > 0.03) {
+  if (edge > minEdge) {
     action = "BUY_YES";
     size = Math.max(1, Math.min(5, Math.round(confidence * 5)));
-  } else if (edge < -0.03) {
+  } else if (edge < -minEdge) {
     action = "BUY_NO";
     size = Math.max(1, Math.min(5, Math.round(confidence * 5)));
   }
