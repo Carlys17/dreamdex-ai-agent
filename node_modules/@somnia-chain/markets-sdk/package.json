@@ -1,0 +1,99 @@
+{
+  "name": "@somnia-chain/markets-sdk",
+  "version": "0.28.1",
+  "description": "Zero-latency client for the Somnia Markets order books (spot + binary): hydrates a consistent Envio/Hasura snapshot, then materializes subsequent blocks — including the resting order book — from chain logs into a reactive store (with React hooks). Writes sign locally with fixed fees and confirm in one round-trip via realtime_sendRawTransaction. No polling anywhere.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "default": "./dist/react.js"
+    },
+    "./chains": {
+      "types": "./dist/chains/index.d.ts",
+      "default": "./dist/chains/index.js"
+    },
+    "./reactivity": {
+      "types": "./dist/reactivity/index.d.ts",
+      "default": "./dist/reactivity/index.js"
+    },
+    "./native": {
+      "types": "./dist/native/index.d.ts",
+      "default": "./dist/native/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "src",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/somnia-chain/somnia-markets.git",
+    "directory": "packages/sdk"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@somnia-chain/reactivity": "^0.2.1",
+    "react": ">=18",
+    "viem": "^2"
+  },
+  "peerDependenciesMeta": {
+    "@somnia-chain/reactivity": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@graphql-codegen/cli": "^7.2.0",
+    "@graphql-codegen/client-preset": "^6.1.0",
+    "@graphql-codegen/schema-ast": "^6.1.0",
+    "@somnia-chain/reactivity": "^0.2.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "graphql": "^16.14.2",
+    "jsdom": "^26",
+    "react": "^19",
+    "react-dom": "^19",
+    "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.12.0",
+    "typescript": "6.0.3",
+    "viem": "^2",
+    "vitest": "^3.2.7"
+  },
+  "sideEffects": false,
+  "license": "MIT",
+  "dependencies": {
+    "@graphql-typed-document-node/core": "^3.2.0"
+  },
+  "scripts": {
+    "dev": "tsc --watch",
+    "gen:addresses": "node scripts/gen-addresses.mjs",
+    "schema:pull": "node scripts/assert-hasura-ready.mjs && node scripts/assert-numeric-stringified.mjs && graphql-codegen --config codegen.schema.ts && node scripts/snapshot-stamp.mjs --write",
+    "gql:codegen": "graphql-codegen --config codegen.ts",
+    "gql:codegen:check": "graphql-codegen --config codegen.ts --check",
+    "schema:check": "node scripts/snapshot-stamp.mjs --check",
+    "types:regen": "scripts/regen-types.sh",
+    "types:regen:check": "scripts/regen-types.sh --check",
+    "errors:gen": "node scripts/gen-contract-errors.mjs",
+    "errors:check": "node scripts/gen-contract-errors.mjs --check",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "build": "tsc",
+    "docs": "typedoc",
+    "docs:lint": "typedoc --treatWarningsAsErrors",
+    "verify": "pnpm typecheck && pnpm errors:check && pnpm build && pnpm test && pnpm docs:lint",
+    "test": "vitest run",
+    "exports:dump": "node scripts/dump-exports.mjs src/index.ts src/react.ts"
+  },
+  "main": "./dist/index.js"
+}
