@@ -26,7 +26,15 @@ export interface AiDecision {
   action: AiAction;
   confidence: number; // 0..1
   fairProbability: number; // 0..1 our estimate of P(Up)
-  edge: number; // fairProbability - marketMid
+  edge: number; // fairProbability - marketMid (ranking signal)
   size: number; // shares to buy
   reasoning: string;
+  /** filled: the decision is final; the agent will not re-buy this window */
+  ts?: number;
+}
+
+export type AiActionStrict = "BUY_YES" | "BUY_NO" | "HOLD";
+
+export function isAiAction(v: unknown): v is AiActionStrict {
+  return v === "BUY_YES" || v === "BUY_NO" || v === "HOLD";
 }

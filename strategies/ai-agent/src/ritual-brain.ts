@@ -15,6 +15,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { MarketSnapshot, AiDecision } from "./types.js";
+import { isAiAction } from "./types.js";
 
 const RITUAL_CHAIN_ID = 1979;
 const LLM_PRECOMPILE = "0x0000000000000000000000000000000000000802" as const;
@@ -185,26 +186,33 @@ export async function ritualDecide(
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   if (!jsonMatch) throw new Error(`Ritual: not JSON: ${text.slice(0, 120)}`);
 
-  const parsed = JSON.parse(jsonMatch[0]) as Array<{
-    symbol: string;
-    fairProbability: number;
-    action: AiDecision["action"];
-    confidence: number;
-    reasoning: string;
-  }>;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    throw new Error(`Ritual: JSON parse failed: ${jsonMatch[0].slice(0, 120)}`);
+  }
+  if (!Array.isArray(parsed)) throw new Error("Ritual: expected a JSON array of decisions");
 
-  return parsed.map((p) => {
-    const m = markets.find((x) => x.symbol === p.symbol);
-    const mid = m?.mid ?? 0.5;
-    const edge = (p.fairProbability ?? 0.5) - mid;
-    return {
-      symbol: p.symbol,
-      action: p.action ?? "HOLD",
-      confidence: Math.max(0, Math.min(1, p.confidence ?? 0)),
-      fairProbability: p.fairProbability ?? 0.5,
-      edge,
-      size: Math.round((p.confidence ?? 0) * 5),
-      reasoning: p.reasoning ?? "",
-    };
-  });
+  // Validate + normalize each entry. Drop malformed rows instead of letting a
+  // bad action string (e.g. "BUY_YES " or "buy_no") slip through as HOLD-and-fill.
+  const out: AiDecision[] = [];
+  for (const raw of parsed as Array<Record<string, unknown>>) {
+    const symbol = typeof raw.symbol === "string" ? raw.symbol : "";
+    const fair = Number(raw.fairProbability);
+    const action = raw.action;
+    if (!symbol || !isFinite(fair) || !isAiAction(action)) continue;
+    const conf = Math.max(0, Math.min(1, Number(raw.confidence) || 0));
+    out.push({
+      symbol,
+      action,
+      confidence: conf,
+      fairProbability: Math.max(0, Math.min(1, fair)),
+      edge: 0, // edge is recomputed in the executor against the live book
+      size: Math.max(0, Math.min(5, Math.round(conf * 5))),
+      reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
+    });
+  }
+  if (out.length === 0) throw new Error("Ritual: no valid decisions in response");
+  return out;
 }

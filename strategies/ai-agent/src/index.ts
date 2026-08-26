@@ -15,6 +15,7 @@ interface AgentConfig {
   maxSize: number;
   pollIntervalMs: number;
   ritualRpcUrl?: string;
+  ritualTimeoutMs: number;
 }
 
 function parseArgs(): { llm?: "heuristic" | "ritual"; dryRun?: boolean } {
@@ -51,6 +52,7 @@ function loadAgentConfig(ctx: EcContext, args: ReturnType<typeof parseArgs>): Ag
     maxSize: Number(process.env.MAX_SIZE ?? "3"),
     pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? "8000"),
     ritualRpcUrl: process.env.RITUAL_RPC_URL,
+    ritualTimeoutMs: Number(process.env.RITUAL_TIMEOUT_MS ?? "90_000"),
   };
 }
 
@@ -104,11 +106,24 @@ async function main() {
       let decisions: AiDecision[] = [];
       if (cfg.llm === "ritual" && cfg.ritualRpcUrl && ctx.config.privateKey) {
         try {
-          decisions = await ritualDecide(
-            { rpcUrl: cfg.ritualRpcUrl, privateKey: ctx.config.privateKey },
-            markets,
-          );
+          // GLM-4.7-FP8 is a reasoning model: 10-40s wall-clock is normal, but
+          // never let it stall the trading loop past the poll cadence.
+          decisions = await Promise.race([
+            ritualDecide(
+              { rpcUrl: cfg.ritualRpcUrl, privateKey: ctx.config.privateKey },
+              markets,
+            ),
+            new Promise<AiDecision[]>((_, reject) =>
+              setTimeout(() => reject(new Error(`ritual timed out after ${cfg.ritualTimeoutMs}ms`)), cfg.ritualTimeoutMs),
+            ),
+          ]);
           log(`ritual LLM -> ${decisions.length} decisions`);
+          // Ritual returns fairProbability per market; recompute edge against
+          // the LIVE book (mid) so downstream gating stays consistent.
+          for (const d of decisions) {
+            const m = markets.find((x) => x.symbol === d.symbol);
+            if (m) d.edge = (d.fairProbability ?? 0.5) - (m.mid ?? 0.5);
+          }
         } catch (err) {
           log(`ritual LLM failed (${(err as Error).message}); heuristic fallback`);
           decisions = [];
@@ -181,7 +196,8 @@ async function main() {
         }
         log(
           `${res.outcome.padEnd(8)} | ${d.action} ${res.size} ${market.symbol} ` +
-            `edge=${d.edge.toFixed(3)} conf=${d.confidence.toFixed(2)} ` +
+            `edge=${d.edge.toFixed(3)} rEdge=${res.realizedEdge !== undefined ? res.realizedEdge.toFixed(3) : "?"} ` +
+            `conf=${d.confidence.toFixed(2)} ` +
             `| ${d.reasoning || res.reason || ""}` +
             (res.hash ? ` tx=${res.hash.slice(0, 12)}` : ""),
         );
